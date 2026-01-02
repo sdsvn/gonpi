@@ -1,0 +1,7 @@
+# gonpi - NPI Registry Go Library
+
+/.vscode/
+*.log
+*.out
+coverage.html
+.DS_Store

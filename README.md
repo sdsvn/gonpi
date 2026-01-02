@@ -1,7 +1,7 @@
 # gonpi
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/sarathsadasivanpillai/gonpi.svg)](https://pkg.go.dev/github.com/sarathsadasivanpillai/gonpi)
-[![Go Report Card](https://goreportcard.com/badge/github.com/sarathsadasivanpillai/gonpi)](https://goreportcard.com/report/github.com/sarathsadasivanpillai/gonpi)
+[![Go Reference](https://pkg.go.dev/badge/github.com/sdsvn/gonpi.svg)](https://pkg.go.dev/github.com/sdsvn/gonpi)
+[![Go Report Card](https://goreportcard.com/badge/github.com/sdsvn/gonpi)](https://goreportcard.com/report/github.com/sdsvn/gonpi)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **Unofficial**, production-ready Go client for the [CMS NPI Registry API v2.1](https://npiregistry.cms.hhs.gov/api-page) with retry logic, caching, and batch operations.
@@ -9,7 +9,7 @@
 ## Installation
 
 ```bash
-go get github.com/sarathsadasivanpillai/gonpi
+go get github.com/sdsvn/gonpi
 ```
 
 ## Quick Start
@@ -22,7 +22,7 @@ import (
     "fmt"
     "log"
     
-    "github.com/sarathsadasivanpillai/gonpi"
+    "github.com/sdsvn/gonpi"
 )
 
 func main() {
@@ -71,7 +71,7 @@ client := npiregistry.NewClient(
 
 ## Documentation
 
-- **[API Reference](https://pkg.go.dev/github.com/sarathsadasivanpillai/gonpi)** - Complete package documentation
+- **[API Reference](https://pkg.go.dev/github.com/sdsvn/gonpi)** - Complete package documentation
 - **[Quick Start Guide](QUICKSTART.md)** - Detailed examples and usage patterns
 - **[Examples](examples/)** - Working code samples
 - **[Search Options](types.go)** - Available filters (name, location, specialty, etc.)
