@@ -3,6 +3,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/sdsvn/gonpi.svg)](https://pkg.go.dev/github.com/sdsvn/gonpi)
 [![Go Report Card](https://goreportcard.com/badge/github.com/sdsvn/gonpi)](https://goreportcard.com/report/github.com/sdsvn/gonpi)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Go](https://github.com/sdsvn/gonpi/actions/workflows/go.yml/badge.svg)](https://github.com/sdsvn/gonpi/actions/workflows/go.yml)
 
 **Unofficial**, production-ready Go client for the [CMS NPI Registry API v2.1](https://npiregistry.cms.hhs.gov/api-page) with retry logic, caching, and batch operations.
 
