@@ -55,7 +55,8 @@ func main() {
 - **Caching**: Optional in-memory cache with TTL
 - **Batch operations**: Concurrent NPI lookups
 - **Full API coverage**: All NPI Registry v2.1 search filters
-- **Well-tested**: 94.6% test coverage
+- **OpenTelemetry tracing**: Built-in distributed tracing support
+- **Well-tested**: 86.7% test coverage
 
 ## Configuration
 
@@ -68,6 +69,25 @@ client := gonpi.NewClient(
     }),
 )
 ```
+
+### OpenTelemetry Tracing
+
+Tracing is automatically enabled using the global OpenTelemetry tracer. Configure your tracer provider at the application level:
+
+```go
+// All client operations are automatically traced
+client := gonpi.NewClient()
+
+// Operations include detailed spans
+provider, err := client.GetProviderByNPI(ctx, "1043218118")
+```
+
+Traces include spans for:
+- Provider lookups and searches
+- Cache hits/misses
+- Retry attempts with errors
+- HTTP requests with status codes
+- Batch operations
 
 ## Documentation
 
