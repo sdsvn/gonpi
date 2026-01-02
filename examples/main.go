@@ -7,13 +7,13 @@ import (
 	"os"
 	"text/tabwriter"
 
-	npiregistry "github.com/sdsvn/gonpi"
+	"github.com/sdsvn/gonpi"
 )
 
 func main() {
 	// Create a new NPI Registry client with caching enabled
-	client := npiregistry.NewClient(
-		npiregistry.WithCache(5 * 60 * 1000000000), // 5 minutes in nanoseconds
+	client := gonpi.NewClient(
+		gonpi.WithCache(5 * 60 * 1000000000), // 5 minutes in nanoseconds
 	)
 
 	ctx := context.Background()
@@ -32,7 +32,7 @@ func main() {
 }
 
 // exampleLookupByNPI demonstrates looking up a provider by NPI number.
-func exampleLookupByNPI(ctx context.Context, client *npiregistry.Client) {
+func exampleLookupByNPI(ctx context.Context, client *gonpi.Client) {
 	// Example NPI
 	npi := "1043218118"
 
@@ -46,8 +46,8 @@ func exampleLookupByNPI(ctx context.Context, client *npiregistry.Client) {
 }
 
 // exampleSearchByName demonstrates searching by provider name.
-func exampleSearchByName(ctx context.Context, client *npiregistry.Client) {
-	opts := npiregistry.SearchOptions{
+func exampleSearchByName(ctx context.Context, client *gonpi.Client) {
+	opts := gonpi.SearchOptions{
 		FirstName: "John",
 		LastName:  "Smith",
 		State:     "CA",
@@ -74,7 +74,7 @@ func exampleSearchByName(ctx context.Context, client *npiregistry.Client) {
 }
 
 // printProvider prints detailed information about a provider.
-func printProvider(provider *npiregistry.Provider) {
+func printProvider(provider *gonpi.Provider) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 
 	fmt.Fprintf(w, "NPI Number:\t%s\n", provider.Number)

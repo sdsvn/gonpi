@@ -26,7 +26,7 @@ import (
 )
 
 func main() {
-    client := npiregistry.NewClient()
+    client := gonpi.NewClient()
     
     // Get provider by NPI
     provider, err := client.GetProviderByNPI(context.Background(), "1043218118")
@@ -36,7 +36,7 @@ func main() {
     fmt.Printf("Provider: %s %s\n", provider.Basic.FirstName, provider.Basic.LastName)
     
     // Search providers
-    results, err := client.SearchProviders(context.Background(), npiregistry.SearchOptions{
+    results, err := client.SearchProviders(context.Background(), gonpi.SearchOptions{
         LastName: "Smith",
         State:    "CA",
         Limit:    10,
@@ -60,9 +60,9 @@ func main() {
 ## Configuration
 
 ```go
-client := npiregistry.NewClient(
-    npiregistry.WithCache(5 * time.Minute),
-    npiregistry.WithRetry(npiregistry.RetryConfig{
+client := gonpi.NewClient(
+    gonpi.WithCache(5 * time.Minute),
+    gonpi.WithRetry(gonpi.RetryConfig{
         MaxRetries:   3,
         InitialDelay: 100 * time.Millisecond,
     }),

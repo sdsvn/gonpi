@@ -1,4 +1,4 @@
-package npiregistry
+package gonpi
 
 import (
 	"context"

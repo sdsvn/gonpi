@@ -1,4 +1,4 @@
-// Package npiregistry provides a comprehensive Go client for the CMS NPI Registry API.
+// Package gonpi provides a comprehensive Go client for the CMS NPI Registry API.
 //
 // The National Provider Identifier (NPI) is a unique identification number for covered
 // health care providers. This library allows you to search and retrieve provider information
@@ -31,9 +31,9 @@
 //
 // Configure the client with custom options:
 //
-//	client := npiregistry.NewClient(
-//	    npiregistry.WithCache(5 * time.Minute),
-//	    npiregistry.WithRetry(npiregistry.RetryConfig{
+//	client := gonpi.NewClient(
+//	    gonpi.WithCache(5 * time.Minute),
+//	    gonpi.WithRetry(gonpi.RetryConfig{
 //	        MaxRetries: 3,
 //	        InitialDelay: 100 * time.Millisecond,
 //	    }),
@@ -47,4 +47,4 @@
 //	results, err := client.GetProvidersByNPIs(context.Background(), npis)
 //
 // For more information, see the examples directory and README.md.
-package npiregistry
+package gonpi
