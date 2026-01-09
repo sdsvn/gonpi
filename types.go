@@ -23,8 +23,8 @@ import (
 type FlexInt int64
 
 // UnmarshalJSON implements custom unmarshaling to handle both string and integer values.
-// It first attempts to unmarshal as an integer. If that fails, it tries to unmarshal
-// as a string and convert it to an integer. Empty strings are treated as 0.
+// It checks the first byte to determine whether the value is a string or integer,
+// then unmarshals accordingly for optimal performance. Empty strings are treated as 0.
 //
 // Supported input formats:
 //   - Integer: 1234567890
@@ -33,30 +33,39 @@ type FlexInt int64
 //
 // Returns an error if the value cannot be parsed as an integer.
 func (f *FlexInt) UnmarshalJSON(data []byte) error {
-	// Try to unmarshal as int first
-	var i int64
-	if err := json.Unmarshal(data, &i); err == nil {
-		*f = FlexInt(i)
-		return nil
-	}
-
-	// Try to unmarshal as string
-	var s string
-	if err := json.Unmarshal(data, &s); err != nil {
-		return err
-	}
-
-	// Convert string to int
-	if s == "" {
+	if len(data) == 0 {
 		*f = 0
 		return nil
 	}
 
-	i, err := strconv.ParseInt(s, 10, 64)
-	if err != nil {
-		return err
+	// Fast path: check first byte to determine type
+	if data[0] == '"' {
+		// It's a string
+		var s string
+		if err := json.Unmarshal(data, &s); err != nil {
+			return err
+		}
+
+		// Handle empty string
+		if s == "" {
+			*f = 0
+			return nil
+		}
+
+		// Parse string as int
+		i, err := strconv.ParseInt(s, 10, 64)
+		if err != nil {
+			return err
+		}
+		*f = FlexInt(i)
+		return nil
 	}
 
+	// It's a number - unmarshal directly
+	var i int64
+	if err := json.Unmarshal(data, &i); err != nil {
+		return err
+	}
 	*f = FlexInt(i)
 	return nil
 }

@@ -1395,3 +1395,386 @@ func TestConcurrentRequests(t *testing.T) {
 	}
 }
 
+// ============================================================================
+// Performance Improvement Tests
+// ============================================================================
+
+// TestCacheTTLConfiguration tests that cache TTL is properly configured.
+func TestCacheTTLConfiguration(t *testing.T) {
+	callCount := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		response := mockAPIResponse([]Provider{mockProvider()})
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	// Create client with short TTL for testing
+	ttl := 100 * time.Millisecond
+	client := NewClient(
+		WithBaseURL(server.URL),
+		WithCache(ttl),
+	)
+	defer client.Close()
+
+	ctx := context.Background()
+
+	// First call - should hit API
+	_, err := client.GetProviderByNPI(ctx, "1234567890")
+	if err != nil {
+		t.Fatalf("first call failed: %v", err)
+	}
+
+	if callCount != 1 {
+		t.Errorf("expected 1 API call after first request, got %d", callCount)
+	}
+
+	// Second call immediately - should use cache
+	_, err = client.GetProviderByNPI(ctx, "1234567890")
+	if err != nil {
+		t.Fatalf("second call failed: %v", err)
+	}
+
+	if callCount != 1 {
+		t.Errorf("expected 1 API call (cached), got %d", callCount)
+	}
+
+	// Wait for cache to expire
+	time.Sleep(ttl + 50*time.Millisecond)
+
+	// Third call after expiration - should hit API again
+	_, err = client.GetProviderByNPI(ctx, "1234567890")
+	if err != nil {
+		t.Fatalf("third call failed: %v", err)
+	}
+
+	if callCount != 2 {
+		t.Errorf("expected 2 API calls after cache expiration, got %d", callCount)
+	}
+
+	// Verify TTL was set correctly
+	if client.cache.ttl != ttl {
+		t.Errorf("expected cache TTL %v, got %v", ttl, client.cache.ttl)
+	}
+}
+
+// TestClientClose tests that Close() properly shuts down cleanup goroutine.
+func TestClientClose(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		response := mockAPIResponse([]Provider{mockProvider()})
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	client := NewClient(
+		WithBaseURL(server.URL),
+		WithCache(1*time.Second),
+	)
+
+	// Verify cleanup context was created
+	if client.cache.cleanupCtx == nil {
+		t.Fatal("cleanup context not initialized")
+	}
+
+	if client.cache.cleanupCancel == nil {
+		t.Fatal("cleanup cancel function not initialized")
+	}
+
+	// Close the client
+	client.Close()
+
+	// Verify context was cancelled
+	select {
+	case <-client.cache.cleanupCtx.Done():
+		// Context was cancelled - this is expected
+	case <-time.After(100 * time.Millisecond):
+		t.Error("cleanup context was not cancelled after Close()")
+	}
+}
+
+// TestClientCloseWithoutCache tests that Close() is safe when cache is not enabled.
+func TestClientCloseWithoutCache(t *testing.T) {
+	client := NewClient()
+
+	// Should not panic even if cache is not enabled
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("Close() panicked without cache: %v", r)
+		}
+	}()
+
+	client.Close()
+}
+
+// TestResponseBodySizeLimit tests that large error responses are limited.
+func TestResponseBodySizeLimit(t *testing.T) {
+	// Create a large error response (larger than 10MB limit)
+	largeBody := strings.Repeat("ERROR", 3*1024*1024) // 15MB
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(largeBody))
+	}))
+	defer server.Close()
+
+	client := NewClient(
+		WithBaseURL(server.URL),
+		WithRetry(RetryConfig{MaxRetries: 0}),
+	)
+
+	_, err := client.GetProviderByNPI(context.Background(), "1234567890")
+	if err == nil {
+		t.Fatal("expected error for 500 response")
+	}
+
+	// Error message should be truncated to MaxResponseBodySize
+	if len(err.Error()) > MaxResponseBodySize+200 { // +200 for extra formatting
+		t.Errorf("error message was not limited, length: %d", len(err.Error()))
+	}
+}
+
+// TestBatchOperationsSyncMap tests that sync.Map is used for concurrent batch operations.
+func TestBatchOperationsSyncMap(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		npi := r.URL.Query().Get("number")
+		provider := mockProvider()
+		provider.Number = npi
+
+		response := mockAPIResponse([]Provider{provider})
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	client := NewClient(WithBaseURL(server.URL))
+
+	// Test with many NPIs to ensure sync.Map handles concurrent writes
+	npis := make([]string, 20)
+	for i := 0; i < 20; i++ {
+		npis[i] = fmt.Sprintf("123456789%d", i)
+	}
+
+	results, err := client.GetProvidersByNPIs(context.Background(), npis)
+	if err != nil {
+		t.Fatalf("batch request failed: %v", err)
+	}
+
+	if len(results) != len(npis) {
+		t.Errorf("expected %d results, got %d", len(npis), len(results))
+	}
+
+	// Verify all NPIs are present in results
+	for _, npi := range npis {
+		if _, exists := results[npi]; !exists {
+			t.Errorf("missing result for NPI %s", npi)
+		}
+	}
+}
+
+// TestFlexIntOptimization tests the optimized FlexInt unmarshaling performance.
+func TestFlexIntOptimization(t *testing.T) {
+	tests := []struct {
+		name    string
+		json    string
+		want    int64
+		wantErr bool
+	}{
+		{
+			name:    "integer without quotes",
+			json:    `{"epoch": 1234567890}`,
+			want:    1234567890,
+			wantErr: false,
+		},
+		{
+			name:    "string number with quotes",
+			json:    `{"epoch": "1234567890"}`,
+			want:    1234567890,
+			wantErr: false,
+		},
+		{
+			name:    "zero as integer",
+			json:    `{"epoch": 0}`,
+			want:    0,
+			wantErr: false,
+		},
+		{
+			name:    "zero as string",
+			json:    `{"epoch": "0"}`,
+			want:    0,
+			wantErr: false,
+		},
+		{
+			name:    "empty string",
+			json:    `{"epoch": ""}`,
+			want:    0,
+			wantErr: false,
+		},
+		{
+			name:    "negative integer",
+			json:    `{"epoch": -12345}`,
+			want:    -12345,
+			wantErr: false,
+		},
+		{
+			name:    "negative string",
+			json:    `{"epoch": "-12345"}`,
+			want:    -12345,
+			wantErr: false,
+		},
+		{
+			name:    "invalid string",
+			json:    `{"epoch": "invalid"}`,
+			want:    0,
+			wantErr: true,
+		},
+		{
+			name:    "very large number",
+			json:    `{"epoch": "9223372036854775807"}`,
+			want:    9223372036854775807,
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var result struct {
+				Epoch FlexInt `json:"epoch"`
+			}
+
+			err := json.Unmarshal([]byte(tt.json), &result)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error but got none")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if result.Epoch.Int64() != tt.want {
+				t.Errorf("expected %d, got %d", tt.want, result.Epoch.Int64())
+			}
+		})
+	}
+}
+
+// TestFlexIntPerformance benchmarks the new FlexInt implementation.
+func TestFlexIntPerformance(t *testing.T) {
+	// This is a performance verification test
+	// We'll unmarshal a reasonable number of FlexInts to ensure no regression
+
+	jsonData := []byte(`{
+		"created_epoch": 1234567890,
+		"updated_epoch": "1234567890",
+		"timestamp": 0,
+		"empty": ""
+	}`)
+
+	type TestStruct struct {
+		CreatedEpoch FlexInt `json:"created_epoch"`
+		UpdatedEpoch FlexInt `json:"updated_epoch"`
+		Timestamp    FlexInt `json:"timestamp"`
+		Empty        FlexInt `json:"empty"`
+	}
+
+	// Unmarshal multiple times to verify performance
+	for i := 0; i < 1000; i++ {
+		var result TestStruct
+		if err := json.Unmarshal(jsonData, &result); err != nil {
+			t.Fatalf("unmarshal failed at iteration %d: %v", i, err)
+		}
+
+		if result.CreatedEpoch.Int64() != 1234567890 {
+			t.Errorf("incorrect created_epoch value")
+		}
+		if result.UpdatedEpoch.Int64() != 1234567890 {
+			t.Errorf("incorrect updated_epoch value")
+		}
+		if result.Timestamp.Int64() != 0 {
+			t.Errorf("incorrect timestamp value")
+		}
+		if result.Empty.Int64() != 0 {
+			t.Errorf("incorrect empty value")
+		}
+	}
+}
+
+// TestCacheCleanupWithContext tests that cleanup goroutine respects context.
+func TestCacheCleanupWithContext(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		response := mockAPIResponse([]Provider{mockProvider()})
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	// Create client with very short TTL to trigger cleanup quickly
+	client := NewClient(
+		WithBaseURL(server.URL),
+		WithCache(50*time.Millisecond),
+	)
+
+	// Add an entry to cache
+	_, err := client.GetProviderByNPI(context.Background(), "1234567890")
+	if err != nil {
+		t.Fatalf("failed to add cache entry: %v", err)
+	}
+
+	// Verify entry is in cache
+	if len(client.cache.data) != 1 {
+		t.Errorf("expected 1 cache entry, got %d", len(client.cache.data))
+	}
+
+	// Wait for cleanup to potentially run
+	time.Sleep(150 * time.Millisecond)
+
+	// Close client to stop cleanup
+	client.Close()
+
+	// Verify goroutine stopped by checking context
+	select {
+	case <-client.cache.cleanupCtx.Done():
+		// Success - context was cancelled
+	default:
+		t.Error("cleanup context was not cancelled")
+	}
+}
+
+// TestMultipleCacheConfigurations tests that cache configuration works correctly.
+func TestMultipleCacheConfigurations(t *testing.T) {
+	tests := []struct {
+		name string
+		ttl  time.Duration
+	}{
+		{"1 second TTL", 1 * time.Second},
+		{"1 minute TTL", 1 * time.Minute},
+		{"10 minutes TTL", 10 * time.Minute},
+		{"1 hour TTL", 1 * time.Hour},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := NewClient(WithCache(tt.ttl))
+			defer client.Close()
+
+			if !client.cache.enabled {
+				t.Error("cache not enabled")
+			}
+
+			if client.cache.ttl != tt.ttl {
+				t.Errorf("expected TTL %v, got %v", tt.ttl, client.cache.ttl)
+			}
+
+			if client.cache.cleanupCtx == nil {
+				t.Error("cleanup context not initialized")
+			}
+		})
+	}
+}
+

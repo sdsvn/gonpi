@@ -34,6 +34,9 @@ const (
 	// MaxLimit is the maximum allowed result limit.
 	MaxLimit = 200
 
+	// MaxResponseBodySize is the maximum size for error response bodies (10MB).
+	MaxResponseBodySize = 10 * 1024 * 1024
+
 	// TracerName is the name used for OpenTelemetry tracer.
 	TracerName = "github.com/sdsvn/gonpi"
 )
@@ -50,9 +53,12 @@ type Client struct {
 
 // cacheStore provides simple in-memory caching for NPI lookups.
 type cacheStore struct {
-	enabled bool
-	data    map[string]*cacheEntry
-	mu      sync.RWMutex
+	enabled   bool
+	data      map[string]*cacheEntry
+	mu        sync.RWMutex
+	ttl       time.Duration
+	cleanupCtx context.Context
+	cleanupCancel context.CancelFunc
 }
 
 type cacheEntry struct {
@@ -76,6 +82,7 @@ func NewClient(opts ...ClientOption) *Client {
 		cache: &cacheStore{
 			enabled: false,
 			data:    make(map[string]*cacheEntry),
+			ttl:     5 * time.Minute,
 		},
 		tracer: otel.Tracer(TracerName),
 	}
@@ -112,8 +119,11 @@ func WithRetry(config RetryConfig) ClientOption {
 func WithCache(ttl time.Duration) ClientOption {
 	return func(c *Client) {
 		c.cache.enabled = true
+		c.cache.ttl = ttl
+		// Create context for cleanup goroutine lifecycle
+		c.cache.cleanupCtx, c.cache.cleanupCancel = context.WithCancel(context.Background())
 		// Start background cleanup goroutine
-		go c.cleanupCache(ttl)
+		go c.cleanupCache()
 	}
 }
 
@@ -121,6 +131,14 @@ func WithCache(ttl time.Duration) ClientOption {
 func WithTracer(tracer trace.Tracer) ClientOption {
 	return func(c *Client) {
 		c.tracer = tracer
+	}
+}
+
+// Close gracefully shuts down the client and stops background goroutines.
+// Call this when the client is no longer needed to prevent goroutine leaks.
+func (c *Client) Close() {
+	if c.cache.cleanupCancel != nil {
+		c.cache.cleanupCancel()
 	}
 }
 
@@ -368,7 +386,9 @@ func (c *Client) doRequest(ctx context.Context, url string, result interface{}) 
 	span.SetAttributes(attribute.Int("http.status_code", resp.StatusCode))
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		// Limit response body size to prevent memory exhaustion
+		limitedReader := io.LimitReader(resp.Body, MaxResponseBodySize)
+		body, _ := io.ReadAll(limitedReader)
 		apiErr := &APIError{
 			StatusCode: resp.StatusCode,
 			Message:    fmt.Sprintf("API returned status %d: %s", resp.StatusCode, string(body)),
@@ -417,24 +437,35 @@ func (c *Client) setCached(npi string, provider *Provider) {
 
 	c.cache.data[npi] = &cacheEntry{
 		provider:  provider,
-		expiresAt: time.Now().Add(5 * time.Minute), // Default 5 minute TTL
+		expiresAt: time.Now().Add(c.cache.ttl),
 	}
 }
 
 // cleanupCache periodically removes expired cache entries.
-func (c *Client) cleanupCache(interval time.Duration) {
+func (c *Client) cleanupCache() {
+	// Use cache TTL as cleanup interval, minimum 1 minute
+	interval := c.cache.ttl
+	if interval < time.Minute {
+		interval = time.Minute
+	}
+
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		c.cache.mu.Lock()
-		now := time.Now()
-		for key, entry := range c.cache.data {
-			if now.After(entry.expiresAt) {
-				delete(c.cache.data, key)
+	for {
+		select {
+		case <-c.cache.cleanupCtx.Done():
+			return
+		case <-ticker.C:
+			c.cache.mu.Lock()
+			now := time.Now()
+			for key, entry := range c.cache.data {
+				if now.After(entry.expiresAt) {
+					delete(c.cache.data, key)
+				}
 			}
+			c.cache.mu.Unlock()
 		}
-		c.cache.mu.Unlock()
 	}
 }
 
@@ -464,8 +495,7 @@ func (c *Client) GetProvidersByNPIs(ctx context.Context, npis []string) (map[str
 		return nil, err
 	}
 
-	results := make(map[string]*Provider)
-	var mu sync.Mutex
+	var resultMap sync.Map
 	var wg sync.WaitGroup
 
 	// Limit concurrent requests to avoid overwhelming the API
@@ -486,14 +516,19 @@ func (c *Client) GetProvidersByNPIs(ctx context.Context, npis []string) (map[str
 				return
 			}
 
-			mu.Lock()
-			results[npi] = provider
-			mu.Unlock()
+			resultMap.Store(npi, provider)
 		}(npi)
 	}
 
 	wg.Wait()
 	close(errChan)
+
+	// Collect results from sync.Map
+	results := make(map[string]*Provider)
+	resultMap.Range(func(key, value interface{}) bool {
+		results[key.(string)] = value.(*Provider)
+		return true
+	})
 
 	// Collect any errors
 	var errs []error
