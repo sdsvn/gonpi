@@ -110,6 +110,18 @@ type Provider struct {
 	LastUpdatedEpoch  FlexInt            `json:"last_updated_epoch"`
 }
 
+func (p Provider) FullName() string {
+	if p.EnumerationType == "NPI-2" {
+		return p.Basic.OrganizationName
+	}
+	fullName := p.Basic.FirstName
+	if p.Basic.MiddleName != "" {
+		fullName += " " + p.Basic.MiddleName
+	}
+	fullName += " " + p.Basic.LastName
+	return fullName
+}
+
 // BasicInfo contains basic information about the provider.
 type BasicInfo struct {
 	FirstName                         string `json:"first_name"`

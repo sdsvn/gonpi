@@ -53,11 +53,11 @@ type Client struct {
 
 // cacheStore provides simple in-memory caching for NPI lookups.
 type cacheStore struct {
-	enabled   bool
-	data      map[string]*cacheEntry
-	mu        sync.RWMutex
-	ttl       time.Duration
-	cleanupCtx context.Context
+	enabled       bool
+	data          map[string]*cacheEntry
+	mu            sync.RWMutex
+	ttl           time.Duration
+	cleanupCtx    context.Context
 	cleanupCancel context.CancelFunc
 }
 
