@@ -3,6 +3,7 @@ package gonpi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -142,7 +143,12 @@ func (c *Client) Close() {
 	}
 }
 
-// GetProviderByNPI fetches a single provider by NPI number.
+// GetProviderByNPI retrieves a provider by NPI number, checking the cache first
+// if the cache is enabled. If no providers are found, nil is returned along
+// with a nil error.
+//
+// The function returns the first matching provider. If the cache is not enabled,
+// the function will always make an API request.
 func (c *Client) GetProviderByNPI(ctx context.Context, npi string) (*Provider, error) {
 	ctx, span := c.tracer.Start(ctx, "GetProviderByNPI",
 		trace.WithAttributes(
@@ -180,9 +186,7 @@ func (c *Client) GetProviderByNPI(ctx context.Context, npi string) (*Provider, e
 	}
 
 	if len(providers) == 0 {
-		err := fmt.Errorf("no provider found with NPI %s", npi)
-		span.SetStatus(codes.Error, err.Error())
-		return nil, err
+		return nil, nil
 	}
 
 	provider := &providers[0]
@@ -195,7 +199,15 @@ func (c *Client) GetProviderByNPI(ctx context.Context, npi string) (*Provider, e
 	return provider, nil
 }
 
-// SearchProviders searches for providers using the specified filters.
+// SearchProviders searches for providers in the NPI Registry using the provided filters.
+//
+// The SearchOptions struct defines all available filters for searching providers. All fields are optional and can be combined to narrow search results.
+// At least one search criterion must be provided.
+//
+// The function returns a slice of Provider structs, which contain detailed information about each provider.
+// If no providers are found, an empty slice is returned along with a nil error.
+//
+// The function also returns an error if the API request fails or if the response cannot be decoded into a slice of Provider structs.
 func (c *Client) SearchProviders(ctx context.Context, opts SearchOptions) ([]Provider, error) {
 	ctx, span := c.tracer.Start(ctx, "SearchProviders",
 		trace.WithAttributes(
@@ -479,7 +491,10 @@ func (e *APIError) Error() string {
 	return e.Message
 }
 
-// GetProvidersByNPIs fetches multiple providers by NPI numbers in batch.
+// GetProvidersByNPIs retrieves multiple providers by NPI number in a single batch operation.
+// The function takes a list of NPI numbers and returns a map of successfully fetched providers.
+// If any of the NPI numbers result in an error, the function will return an error containing the first error encountered.
+// The function is designed to be safe for concurrent use and will limit the number of concurrent requests to the API.
 func (c *Client) GetProvidersByNPIs(ctx context.Context, npis []string) (map[string]*Provider, error) {
 	ctx, span := c.tracer.Start(ctx, "GetProvidersByNPIs",
 		trace.WithAttributes(
@@ -515,8 +530,9 @@ func (c *Client) GetProvidersByNPIs(ctx context.Context, npis []string) (map[str
 				errChan <- fmt.Errorf("failed to fetch NPI %s: %w", npi, err)
 				return
 			}
-
-			resultMap.Store(npi, provider)
+			if provider != nil {
+				resultMap.Store(npi, provider)
+			}
 		}(npi)
 	}
 
@@ -525,7 +541,7 @@ func (c *Client) GetProvidersByNPIs(ctx context.Context, npis []string) (map[str
 
 	// Collect results from sync.Map
 	results := make(map[string]*Provider)
-	resultMap.Range(func(key, value interface{}) bool {
+	resultMap.Range(func(key, value any) bool {
 		results[key.(string)] = value.(*Provider)
 		return true
 	})
@@ -542,7 +558,7 @@ func (c *Client) GetProvidersByNPIs(ctx context.Context, npis []string) (map[str
 	)
 
 	if len(errs) > 0 {
-		err := fmt.Errorf("batch fetch completed with %d errors: %v", len(errs), errs[0])
+		err := errors.Join(errs...)
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "partial batch failure")
 		return results, err

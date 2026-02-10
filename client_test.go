@@ -141,13 +141,13 @@ func TestGetProviderByNPI_NotFound(t *testing.T) {
 
 	client := NewClient(WithBaseURL(server.URL))
 
-	_, err := client.GetProviderByNPI(context.Background(), "9999999999")
-	if err == nil {
-		t.Fatal("expected error for non-existent NPI")
+	p, err := client.GetProviderByNPI(context.Background(), "9999999999")
+	if p != nil {
+		t.Errorf("expected nil provider, got %v", p)
 	}
 
-	if err.Error() != "no provider found with NPI 9999999999" {
-		t.Errorf("unexpected error message: %v", err)
+	if err != nil {
+		t.Errorf("expected nil error, got %v", err)
 	}
 }
 
@@ -1777,4 +1777,3 @@ func TestMultipleCacheConfigurations(t *testing.T) {
 		})
 	}
 }
-
