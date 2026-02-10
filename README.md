@@ -93,7 +93,6 @@ Traces include spans for:
 ## Documentation
 
 - **[API Reference](https://pkg.go.dev/github.com/sdsvn/gonpi)** - Complete package documentation
-- **[Quick Start Guide](QUICKSTART.md)** - Detailed examples and usage patterns
 - **[Examples](examples/)** - Working code samples
 - **[Search Options](types.go)** - Available filters (name, location, specialty, etc.)
 
